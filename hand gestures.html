@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Gesture Particles - Hamza Rehan</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Inter', sans-serif; }
+        canvas { display: block; }
+        
+        #ui-overlay {
+            position: absolute;
+            top: 25px;
+            right: 25px;
+            color: white;
+            text-align: right;
+            z-index: 10;
+        }
+
+        .watermark {
+            font-size: 1.5rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            background: linear-gradient(45deg, #00dbde, #fc00ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 10px rgba(252, 0, 255, 0.3));
+        }
+
+        #gesture-label {
+            margin-top: 5px;
+            font-size: 0.9rem;
+            color: #00dbde;
+            letter-spacing: 2px;
+            font-weight: bold;
+        }
+
+        #guide {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.8rem;
+            line-height: 1.6;
+            background: rgba(0,0,0,0.4);
+            padding: 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        #loading {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 100;
+        }
+
+        #input_video { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="loading">
+        <h2>Initializing Camera...</h2>
+        <p>Please grant permission to start the experience.</p>
+    </div>
+
+    <div id="ui-overlay">
+        <div class="watermark">Made by Hamza Rehan</div>
+        <div id="gesture-label">Detecting...</div>
+    </div>
+
+    <div id="guide">
+        <b>COMMANDS:</b><br>
+        🖐️ Open Palm → Flower<br>
+        ✊ Fist → Heart<br>
+        ☝️ Pointing → Saturn<br>
+        👌 Pinch → Firework
+    </div>
+
+    <video id="input_video" playsinline></video>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <script>
+        const particleCount = 10000;
+        let lastGesture = "";
+
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+        const targetPositions = new Float32Array(particleCount * 3);
+        const colors = new Float32Array(particleCount * 3);
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const material = new THREE.PointsMaterial({
+            size: 0.03,
+            vertexColors: true,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const points = new THREE.Points(geometry, material);
+        scene.add(points);
+        camera.position.z = 8;
+
+        // --- GESTURE SHAPES ---
+        const setShape = {
+            heart: () => {
+                for (let i = 0; i < particleCount; i++) {
+                    const t = Math.random() * Math.PI * 2;
+                    targetPositions[i*3] = 3 * Math.pow(Math.sin(t), 3);
+                    targetPositions[i*3+1] = 2.5 * Math.cos(t) - 1 * Math.cos(2*t) - 0.4 * Math.cos(3*t);
+                    targetPositions[i*3+2] = (Math.random()-0.5) * 1;
+                }
+            },
+            flower: () => {
+                for (let i = 0; i < particleCount; i++) {
+                    const a = Math.random() * Math.PI * 2;
+                    const r = 4 * Math.sin(5 * a);
+                    targetPositions[i*3] = r * Math.cos(a);
+                    targetPositions[i*3+1] = r * Math.sin(a);
+                    targetPositions[i*3+2] = (Math.random()-0.5);
+                }
+            },
+            saturn: () => {
+                for (let i = 0; i < particleCount; i++) {
+                    if (i < particleCount * 0.4) {
+                        const u = Math.random(), v = Math.random();
+                        const th = 2 * Math.PI * u, ph = Math.acos(2 * v - 1);
+                        targetPositions[i*3] = 2 * Math.sin(ph) * Math.cos(th);
+                        targetPositions[i*3+1] = 2 * Math.sin(ph) * Math.sin(th);
+                        targetPositions[i*3+2] = 2 * Math.cos(ph);
+                    } else {
+                        const a = Math.random() * Math.PI * 2;
+                        const r = 3.5 + Math.random() * 1.5;
+                        targetPositions[i*3] = r * Math.cos(a);
+                        targetPositions[i*3+1] = (r * Math.sin(a)) * 0.2;
+                        targetPositions[i*3+2] = r * Math.sin(a);
+                    }
+                }
+            },
+            firework: () => {
+                for (let i = 0; i < particleCount; i++) {
+                    const r = Math.random() * 5;
+                    const th = Math.random() * Math.PI * 2;
+                    const ph = Math.random() * Math.PI;
+                    targetPositions[i*3] = r * Math.sin(ph) * Math.cos(th);
+                    targetPositions[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+                    targetPositions[i*3+2] = r * Math.cos(ph);
+                }
+            }
+        };
+
+        // --- HAND AI LOGIC ---
+        function detectGesture(lm) {
+            const label = document.getElementById('gesture-label');
+            
+            // Check if fingers are extended (Tip is above Pip joint)
+            const indexUp = lm[8].y < lm[6].y;
+            const middleUp = lm[12].y < lm[10].y;
+            const ringUp = lm[16].y < lm[14].y;
+            const pinkyUp = lm[20].y < lm[18].y;
+            const thumbPinch = Math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y) < 0.05;
+
+            let current = "";
+            if (indexUp && middleUp && ringUp && pinkyUp) {
+                current = "flower";
+                label.innerText = "GESTURE: FLOWER";
+            } else if (!indexUp && !middleUp && !ringUp && !pinkyUp) {
+                current = "heart";
+                label.innerText = "GESTURE: HEART";
+            } else if (thumbPinch) {
+                current = "firework";
+                label.innerText = "GESTURE: FIREWORK";
+            } else if (indexUp) {
+                current = "saturn";
+                label.innerText = "GESTURE: SATURN";
+            }
+
+            if (current !== lastGesture && current !== "") {
+                setShape[current]();
+                lastGesture = current;
+            }
+        }
+
+        async function init() {
+            const video = document.getElementById('input_video');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                document.getElementById('loading').style.display = 'none';
+
+                const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+                hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
+                hands.onResults(res => {
+                    if (res.multiHandLandmarks.length > 0) detectGesture(res.multiHandLandmarks[0]);
+                });
+
+                const cam = new Camera(video, { onFrame: async () => await hands.send({image: video}) });
+                cam.start();
+            } catch (e) { alert("Camera error: " + e); }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const pos = geometry.attributes.position.array;
+            const col = geometry.attributes.color.array;
+
+            for (let i = 0; i < particleCount * 3; i++) {
+                pos[i] += (targetPositions[i] - pos[i]) * 0.1; // Smooth transition
+                if (i % 3 === 0) { // Cycle colors
+                    col[i] = 0.5 + 0.5 * Math.sin(Date.now() * 0.001 + i);
+                }
+            }
+            
+            geometry.attributes.position.needsUpdate = true;
+            geometry.attributes.color.needsUpdate = true;
+            points.rotation.y += 0.003;
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        setShape.heart();
+        init();
+        animate();
+    </script>
+</body>
+</html>
